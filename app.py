@@ -125,6 +125,28 @@ def ingest():
 
         result = email_parser.parse_email(subject, body, received)
 
+        if result.status == "transaction":
+            # The statement import may already have this purchase. The statement
+            # carries the transaction date and the email the posted date, so
+            # they can be days apart — match on merchant and amount, close by.
+            txn = result.txn
+            key_merchant = categorize.normalise(txn["merchant"])
+            near = session.scalars(
+                select(Transaction).where(
+                    Transaction.amount == txn["amount"],
+                    Transaction.date >= txn["date"] - timedelta(days=4),
+                    Transaction.date <= txn["date"] + timedelta(days=4),
+                )
+            ).all()
+            twin = next(
+                (t for t in near if categorize.normalise(t.merchant) == key_merchant), None
+            )
+            if twin is not None:
+                _log(session, gmail_id, subject, "ignored",
+                     f"already logged from the {twin.source} on {twin.date.isoformat()}")
+                session.commit()
+                return jsonify({"status": "ignored", "reason": "already logged"})
+
         if result.status != "transaction":
             _log(session, gmail_id, subject, result.status, result.reason)
             session.commit()
