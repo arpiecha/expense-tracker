@@ -126,11 +126,16 @@ CLAUDE_SYSTEM = (
 )
 
 
-def ask_claude(merchant: str) -> str:
+def ask_claude(merchant: str) -> str | None:
+    """The category Claude picks, or None if it could not be asked.
+
+    None and FALLBACK are different answers: None means we never got one, and
+    a guess we never got must not be written down as a rule.
+    """
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
-        logger.info("No ANTHROPIC_API_KEY; filing %s under %s", merchant, FALLBACK)
-        return FALLBACK
+        logger.info("No ANTHROPIC_API_KEY; filing %s under %s for now", merchant, FALLBACK)
+        return None
     try:
         import anthropic
 
@@ -145,7 +150,7 @@ def ask_claude(merchant: str) -> str:
         answer = (raw or "").strip().strip(".").strip()
     except Exception:                                  # noqa: BLE001
         logger.exception("Claude could not categorise %s", merchant)
-        return FALLBACK
+        return None
 
     for category in CATEGORIES:
         if answer.lower() == category.lower():
@@ -154,14 +159,22 @@ def ask_claude(merchant: str) -> str:
         if category.lower() in answer.lower():
             return category
     logger.info("Claude answered %r for %s, which is not a category", answer, merchant)
-    return FALLBACK
+    return None
 
 
 def categorize(session, merchant: str) -> str:
-    """The category for this merchant, asking Claude only the first time."""
+    """The category for this merchant, asking Claude only the first time.
+
+    A rule is written only when Claude actually answered. Remembering the
+    fallback would file the merchant under Other for good and stop it ever
+    being asked again — which is exactly what happened while the API key was
+    missing.
+    """
     existing = rule_for(session, merchant)
     if existing:
         return existing
     category = ask_claude(merchant)
+    if category is None:
+        return FALLBACK
     remember(session, merchant, category)
     return category

@@ -386,6 +386,39 @@ def list_rules():
         return jsonify([r.to_dict() for r in rows])
 
 
+@app.route("/recategorize", methods=["POST"])
+def recategorize():
+    """Ask again about everything still sitting in the fallback category.
+
+    Useful after the API key is added, or after a stretch where Claude could
+    not be reached and merchants landed in Other by default.
+    """
+    if (err := require_auth()):
+        return err
+
+    changed = 0
+    with SessionLocal() as session:
+        # Drop rules that only say Other — they are the remembered fallback.
+        for rule in session.scalars(
+            select(MerchantRule).where(MerchantRule.category == categorize.FALLBACK)
+        ).all():
+            session.delete(rule)
+        session.flush()
+
+        rows = session.scalars(
+            select(Transaction).where(Transaction.category == categorize.FALLBACK)
+        ).all()
+        for row in rows:
+            category = categorize.categorize(session, row.merchant)
+            if category != row.category:
+                row.category = category
+                changed += 1
+        session.commit()
+
+    logger.info("Recategorised %s of %s", changed, len(rows))
+    return jsonify({"success": True, "looked_at": len(rows), "changed": changed})
+
+
 # --- statement import ---------------------------------------------------
 
 def _read_rows(filename: str, raw: bytes) -> list[dict]:
