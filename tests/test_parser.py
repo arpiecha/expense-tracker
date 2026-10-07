@@ -7,6 +7,7 @@ Run: python -I tests/test_parser.py
 """
 
 import os
+import pathlib
 import sys
 from datetime import date
 
@@ -112,6 +113,34 @@ for desc, want in [
     ("AMAZON RETA* 5L65G7Q41", False),
 ]:
     check(f"card payment? {desc}", email_parser.looks_like_card_payment(desc), want)
+
+print("\nReal emails, pulled from the actual Gmail account")
+SAMPLES = pathlib.Path(__file__).parent / "samples"
+
+r = parse("You have a credit from AMAZON RETA* 5L65G7Q41",
+          (SAMPLES / "real_credit.txt").read_text())
+check("real credit -> transaction", r.status, "transaction")
+if r.txn:
+    check("real credit merchant", r.txn["merchant"], "AMAZON RETA* 5L65G7Q41")
+    check("real credit amount", r.txn["amount"], -38.85)
+    check("real credit date", r.txn["date"], date(2026, 10, 1))
+    check("real credit card", r.txn["card_last4"], "5508")
+
+# $13,996.22 landing as a refund would wreck every total in the app.
+r = parse("We've received your payment", (SAMPLES / "real_payment.txt").read_text())
+check("real payment -> ignored", r.status, "ignored")
+r = parse("Your account", (SAMPLES / "real_payment.txt").read_text())
+check("real payment ignored on body alone", r.status, "ignored")
+
+# The footer says "payment", "credit" and "fraud" on every email including
+# real purchases, so it must not be read as a reason to ignore one.
+footer = (SAMPLES / "real_credit.txt").read_text()
+footer_only = footer[footer.lower().find("was this email relevant"):]
+r = parse("Transaction alert",
+          "SHELL OIL 574 charged your account for $48.20 on Oct. 6, 2026.\n" + footer_only)
+check("purchase survives the footer", r.status, "transaction")
+if r.txn:
+    check("purchase merchant past footer", r.txn["merchant"], "SHELL OIL 574")
 
 print()
 if failures:

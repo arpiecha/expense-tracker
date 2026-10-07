@@ -1,0 +1,23 @@
+View your payment details.
+--
+[Capital One | Venture]
+[Venture]
+Venture Credit Card...5508
+Thanks for your payment of $13,996.22
+ADRIAN,
+Here are the details of your payment:
+Payment amount:
+$13,996.22
+Posted date:
+October 4, 2026
+Your available credit will typically be updated within a day of
+your payment posted date, but it can sometimes take longer.
+----------------------------------------
+
+Was this email relevant?
+
+----------------------------------------
+
+About this message
+[Unsubscribe with one click](https://messaging.capitalone.com/XXXX) if you no longer want to receive this account alert.
+This email was sent to arpiecha@gmail.com and contains information directly related to your account.

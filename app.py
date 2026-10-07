@@ -479,24 +479,29 @@ def import_statement():
             if session.scalar(select(Transaction).where(Transaction.gmail_id == key)):
                 skipped += 1
                 continue
-            # An emailed alert for the same purchase arrived first: same day,
-            # same amount, so do not log it twice.
-            twin = session.scalar(
+            # An emailed alert for the same purchase may already be logged.
+            # The email quotes the posted date and the statement the
+            # transaction date, so they can be days apart — match on the
+            # merchant and the amount within a few days either way.
+            twins = session.scalars(
                 select(Transaction).where(
-                    Transaction.date == when,
                     Transaction.amount == amount,
                     Transaction.source == "email",
+                    Transaction.date >= when - timedelta(days=4),
+                    Transaction.date <= when + timedelta(days=4),
                 )
-            )
-            if twin is not None:
+            ).all()
+            key_merchant = categorize.normalise(merchant)
+            if any(categorize.normalise(t.merchant) == key_merchant for t in twins):
                 skipped += 1
                 continue
 
             statement_category = _pick(row, "Category")
             category = categorize.rule_for(session, merchant)
             if not category:
-                if statement_category in categorize.CATEGORIES:
-                    category = statement_category
+                category = (statement_category if statement_category in categorize.CATEGORIES
+                            else categorize.from_statement_category(statement_category))
+                if category:
                     categorize.remember(session, merchant, category)
                 else:
                     category = categorize.categorize(session, merchant)

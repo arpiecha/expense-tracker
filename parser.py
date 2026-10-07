@@ -23,7 +23,9 @@ IGNORE_PATTERNS = [
     (r"(received|processed) your payment", "payment to the card"),
     (r"payment of \$[\d,.]+ is scheduled", "scheduled payment"),
     (r"scheduled (a |your )?payment", "scheduled payment"),
-    (r"thank you for your payment", "payment to the card"),
+    (r"thanks? (you )?for your payment", "payment to the card"),
+    (r"your payment of \$[\d,]+", "payment to the card"),
+    (r"here are the details of your payment", "payment to the card"),
     (r"charged twice", "duplicate-charge notice"),
     (r"your statement is ready", "statement"),
     (r"statement is available", "statement"),
@@ -132,9 +134,31 @@ def looks_like_card_payment(description: str) -> bool:
     return any(re.search(p, text) for p in CARD_PAYMENT_PATTERNS)
 
 
+# Everything below one of these is Capital One's standard footer. It mentions
+# payments, credit and fraud on every email, including real purchases.
+BOILERPLATE_MARKERS = (
+    "was this email relevant",
+    "about this message",
+    "unsubscribe with one click",
+    "this email was sent to",
+    "please do not reply to this message",
+)
+
+
+def meaningful_part(body: str) -> str:
+    """The body with the footer cut off."""
+    lowered = (body or "").lower()
+    cut = len(body or "")
+    for marker in BOILERPLATE_MARKERS:
+        found = lowered.find(marker)
+        if found != -1:
+            cut = min(cut, found)
+    return (body or "")[:cut]
+
+
 def ignored_reason(subject: str, body: str) -> str | None:
     """Why this email is not a purchase, or None if it might be one."""
-    haystack = f"{subject}\n{body}".lower()
+    haystack = f"{subject}\n{meaningful_part(body)}".lower()
     for pattern, reason in IGNORE_PATTERNS:
         if re.search(pattern, haystack, re.IGNORECASE):
             return reason
@@ -150,7 +174,7 @@ def parse_email(subject: str, body: str, received: date, use_claude: bool = True
     if reason:
         return ParseResult("ignored", reason)
 
-    text = f"{subject}\n{body}"
+    text = f"{subject}\n{meaningful_part(body)}"
     card = RE_CARD.search(text)
     card_last4 = card.group(1) if card else None
 
@@ -234,6 +258,11 @@ def _ask_claude(subject: str, body: str, received: date, card_last4: str | None)
     merchant = _clean_merchant(str(data.get("merchant") or ""))
     if not merchant:
         return ParseResult("failed", "Claude did not give a merchant")
+    # Only charges and refunds are ever logged. If Claude read a payment to the
+    # card as a purchase, the merchant gives it away — a payment is not spending
+    # and a wrong one here would be the size of a whole statement.
+    if looks_like_card_payment(merchant) or "capital one" in merchant.lower():
+        return ParseResult("ignored", "payment to the card")
     try:
         amount = abs(round(float(data.get("amount")), 2))
     except (TypeError, ValueError):

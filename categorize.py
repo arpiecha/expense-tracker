@@ -80,6 +80,41 @@ def remember(session, merchant: str, category: str) -> None:
         session.add(MerchantRule(pattern=key, category=category))
 
 
+# Capital One already categorises every statement line. Its names are not ours,
+# but the mapping is obvious and free — far better than asking Claude 45 times
+# for a statement it already labelled.
+STATEMENT_CATEGORIES = {
+    "dining": "Food & Drink",
+    "restaurants": "Food & Drink",
+    "food": "Food & Drink",
+    "grocery": "Groceries",
+    "groceries": "Groceries",
+    "gas/automotive": "Gas",
+    "gas": "Gas",
+    "automotive": "Gas",
+    "merchandise": "Shopping",
+    "shopping": "Shopping",
+    "department stores": "Shopping",
+    "phone/cable": "Bills & Utilities",
+    "utilities": "Bills & Utilities",
+    "insurance": "Bills & Utilities",
+    "internet": "Bills & Utilities",
+    "entertainment": "Entertainment",
+    "other travel": "Travel",
+    "travel": "Travel",
+    "airfare": "Travel",
+    "lodging": "Travel",
+    "car rental": "Travel",
+    "professional services": "Construction / Business",
+    "home improvement": "Construction / Business",
+}
+
+
+def from_statement_category(name: str) -> str | None:
+    """Our category for one of Capital One's, if we know it."""
+    return STATEMENT_CATEGORIES.get((name or "").strip().lower())
+
+
 CLAUDE_SYSTEM = (
     "You put a credit-card merchant into exactly one spending category.\n\n"
     "Reply with the category name only — no punctuation, no explanation.\n\n"

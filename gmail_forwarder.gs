@@ -14,16 +14,18 @@ const SECRET  = "PUT-YOUR-INGEST-SECRET-HERE";
 
 const LABEL_NAME = "Expenses CapitalOne";
 const DONE_NAME  = "Expenses CapitalOne/Processed";
+const SENDER     = "capitalone@notification.capitalone.com";
+const LOOK_BACK  = "7d";   // how far back a run will look for anything missed
 
 function forwardExpenses() {
-  const label = GmailApp.getUserLabelByName(LABEL_NAME);
-  if (!label) {
-    Logger.log("No label called '" + LABEL_NAME + "' — check the name in Gmail.");
-    return;
-  }
   const done = GmailApp.getUserLabelByName(DONE_NAME) || GmailApp.createLabel(DONE_NAME);
 
-  const threads = label.getThreads(0, 50);
+  // The label is the intended source. The sender is included as a safety net so
+  // that if the Gmail filter is missing, renamed, or stops matching, the alerts
+  // still come through from the inbox instead of being silently missed.
+  const query = '(label:"' + LABEL_NAME + '" OR from:' + SENDER + ')' +
+                ' -label:"' + DONE_NAME + '" newer_than:' + LOOK_BACK;
+  const threads = GmailApp.search(query, 0, 50);
   let sent = 0;
 
   threads.forEach(function (t) {
