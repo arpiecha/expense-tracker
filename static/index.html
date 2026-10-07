@@ -69,11 +69,31 @@
   .lg .pc { color:var(--muted); font-size:12px; flex-shrink:0; }
   .lg .amt { font-weight:500; flex-shrink:0; white-space:nowrap; font-variant-numeric:tabular-nums; }
 
+  /* Tapping a category opens its purchases right underneath it. */
+  .lg .chev { color:var(--muted); font-size:9px; width:8px; flex-shrink:0;
+              transition:transform 0.2s ease; }
+  .lg.on .chev { transform:rotate(90deg); }
+  .catbody { display:none; padding:2px 0 10px 27px; }
+  .catbody.open { display:block; }
+  .catrow { display:flex; align-items:baseline; gap:9px; padding:7px 0;
+            border-top:1px solid var(--line-soft); font-size:13px; }
+  .catrow .cm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .catrow .cd { color:var(--muted); font-size:12px; flex-shrink:0; }
+  .catrow .ca { font-weight:500; flex-shrink:0; white-space:nowrap;
+                font-variant-numeric:tabular-nums; }
+  .catrow .ca.credit { color:var(--green); }
+  .catsum { font-size:12px; color:var(--muted); padding:7px 0 0; }
+
   .day + .day { border-top:1px solid var(--line-soft); }
   .dayhead { display:flex; align-items:center; gap:10px; padding:12px 2px; cursor:pointer; }
   .dayhead .chev { color:var(--muted); font-size:10px; width:9px; flex-shrink:0;
                    transition:transform 0.2s ease; }
   .day.open .dayhead .chev { transform:rotate(90deg); }
+  /* An open day gets a green band so several open at once stay apart. */
+  .day.open .dayhead { background:var(--green-tint); border-radius:8px;
+                       padding-left:9px; padding-right:9px; margin:0 -5px; }
+  .day.open .dayhead .d, .day.open .dayhead .t { color:var(--green); }
+  .day.open .dayhead .n { color:#4C8C77; }
   .dayhead .d { font-size:14px; font-weight:500; flex:1; min-width:0;
                 overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .dayhead .n { color:var(--muted); font-size:12px; flex-shrink:0; }
@@ -276,7 +296,8 @@ let month = null;              // 'YYYY-MM', null means the current month
 let summary = null;
 let categories = [];
 let dayCache = {};             // date -> transactions, so a reopen is instant
-let catFilter = null;          // a slice tapped in the chart
+let openCats = new Set();      // categories expanded in the legend
+let monthTxns = null;          // this month's purchases, for the category lists
 let openDays = new Set();
 let editing = null;            // the transaction being edited
 let chipTarget = null;         // the transaction whose chip was tapped
@@ -344,6 +365,7 @@ async function load() {
   if (r.status === 401) { openSheet('m-auth'); return; }
   summary = await r.json();
   dayCache = {};
+  monthTxns = null;
   render();
 }
 
@@ -391,30 +413,65 @@ function renderChart() {
         responsive: true, maintainAspectRatio: false, cutout: '62%',
         plugins: { legend: { display: false },
                    tooltip: { callbacks: { label: c => c.label + ' ' + money(c.raw) } } },
-        onClick: (_e, els) => { if (els.length) toggleFilter(cats[els[0].index].category); }
+        // Tapping a slice opens that category's list below the chart.
+        onClick: (_e, els) => { if (els.length) toggleCategory(cats[els[0].index].category); }
       }
     });
   }
 
   $('legend').innerHTML = cats.map((c, i) => {
     const pct = total ? Math.round(c.total / total * 100) : 0;
-    return '<div class="lg' + (catFilter === c.category ? ' on' : '') +
-      '" data-cat="' + esc(c.category) + '">' +
-      '<span class="dot" style="background:' + PALETTE[i % PALETTE.length] + '"></span>' +
-      '<span class="nm">' + esc(c.category) + '</span>' +
-      '<span class="pc">' + pct + '%</span>' +
-      '<span class="amt">' + money(c.total) + '</span></div>';
+    const open = openCats.has(c.category);
+    return '<div class="lgwrap">' +
+      '<div class="lg' + (open ? ' on' : '') + '" data-cat="' + esc(c.category) + '">' +
+        '<span class="chev">▶</span>' +
+        '<span class="dot" style="background:' + PALETTE[i % PALETTE.length] + '"></span>' +
+        '<span class="nm">' + esc(c.category) + '</span>' +
+        '<span class="pc">' + pct + '%</span>' +
+        '<span class="amt">' + money(c.total) + '</span>' +
+      '</div>' +
+      '<div class="catbody' + (open ? ' open' : '') + '" id="cat-' +
+        c.category.replace(/[^A-Za-z]/g, '') + '"></div>' +
+    '</div>';
   }).join('') || '<div class="empty">Nothing yet this month</div>';
 
   $('legend').querySelectorAll('.lg').forEach(el => {
-    el.onclick = () => toggleFilter(el.dataset.cat);
+    el.onclick = () => toggleCategory(el.dataset.cat);
   });
+  openCats.forEach(c => fillCategory(c));
 }
 
-function toggleFilter(cat) {
-  catFilter = (catFilter === cat) ? null : cat;
+function catBodyId(cat) { return 'cat-' + cat.replace(/[^A-Za-z]/g, ''); }
+
+async function toggleCategory(cat) {
+  if (openCats.has(cat)) openCats.delete(cat); else openCats.add(cat);
   renderChart();
-  renderDays();
+  if (openCats.has(cat)) await fillCategory(cat);
+}
+
+// Every purchase in one category this month, newest first.
+async function fillCategory(cat) {
+  const body = $(catBodyId(cat));
+  if (!body) return;
+  if (!monthTxns) {
+    body.innerHTML = '<div class="catsum">Loading…</div>';
+    monthTxns = await (await api('/transactions?month=' + summary.month)).json();
+  }
+  const rows = monthTxns.filter(t => t.category === cat);
+  if (!rows.length) { body.innerHTML = '<div class="catsum">Nothing here</div>'; return; }
+  body.innerHTML = rows.map(t =>
+    '<div class="catrow">' +
+      '<span class="cm">' + esc(t.merchant) + '</span>' +
+      '<span class="cd">' + esc(shortDate(t.date)) + '</span>' +
+      '<span class="ca' + (t.amount < 0 ? ' credit' : '') + '">' + money(t.amount) + '</span>' +
+    '</div>').join('') +
+    '<div class="catsum">' + rows.length +
+      (rows.length === 1 ? ' purchase' : ' purchases') + '</div>';
+}
+
+function shortDate(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 function dayName(iso) {
@@ -424,7 +481,7 @@ function dayName(iso) {
 }
 
 function renderDays() {
-  $('dayshead').textContent = catFilter ? 'Every day · ' + catFilter : 'Every day';
+  $('dayshead').textContent = 'Every day';
   const days = summary.by_day;
   if (!days.length) {
     $('days').innerHTML = '<div class="empty">No purchases this month</div>';
@@ -461,8 +518,8 @@ async function fillDay(iso) {
     body.innerHTML = '<div class="empty">Loading…</div>';
     dayCache[iso] = await (await api('/transactions?date=' + iso)).json();
   }
-  const rows = dayCache[iso].filter(t => !catFilter || t.category === catFilter);
-  if (!rows.length) { body.innerHTML = '<div class="empty">Nothing in this category</div>'; return; }
+  const rows = dayCache[iso];
+  if (!rows.length) { body.innerHTML = '<div class="empty">Nothing that day</div>'; return; }
   body.innerHTML = rows.map(t =>
     '<div class="txn" data-id="' + t.id + '">' +
       '<div class="m">' + esc(t.merchant) + '</div>' +
@@ -583,7 +640,7 @@ function shiftMonth(by) {
   const d = new Date(y, m - 1 + by, 1);
   month = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
   openDays = new Set();
-  catFilter = null;
+  openCats = new Set();
   load();
 }
 $('prev').onclick = () => shiftMonth(-1);
