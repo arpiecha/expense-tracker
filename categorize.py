@@ -21,6 +21,7 @@ CATEGORIES = [
     "Gas",
     "Shopping",
     "Subscriptions",
+    "Rent",
     "Bills & Utilities",
     "Entertainment",
     "Travel",
@@ -30,6 +31,32 @@ CATEGORIES = [
 ]
 
 FALLBACK = "Other"
+
+# Merchants whose category is not a judgement call. Seeded once on startup and
+# never overwritten afterwards, so changing one on the dashboard still sticks.
+# Peoples Gas and ComEd are the heating and the electric — housing, not fuel,
+# which is what "Gas" means everywhere else in this app.
+DEFAULT_RULES = {
+    "APF GOLDBERG & PERL": "Rent",
+    "GOLDBERG & PERL": "Rent",
+    "GOLDBERG PERL": "Rent",
+    "PEOPLES GAS": "Rent",
+    "PEOPLES ENERGY": "Rent",
+    "COMED": "Rent",
+    "EXELON": "Rent",
+}
+
+
+def seed_default_rules(session) -> int:
+    """Put the fixed rules in place, leaving any that already exist alone."""
+    added = 0
+    for pattern, category in DEFAULT_RULES.items():
+        key = normalise(pattern)
+        if not key or session.scalar(select(MerchantRule).where(MerchantRule.pattern == key)):
+            continue
+        session.add(MerchantRule(pattern=key, category=category))
+        added += 1
+    return added
 
 
 def normalise(merchant: str) -> str:
@@ -45,7 +72,8 @@ def normalise(merchant: str) -> str:
     # Reference codes mix letters and digits (5L65G7Q41); plain words do not,
     # so STARBUCKS survives and the code does not.
     m = re.sub(r"\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{6,}\b", " ", m)
-    m = re.sub(r"\b(INC|LLC|LTD|CO|CORP|COM|USA)\b", " ", m)
+    m = re.sub(r"\.COM\b", " ", m)                    # amazon.com, not "COM ED"
+    m = re.sub(r"\b(INC|LLC|LTD|CORP|USA)\b", " ", m)
     m = re.sub(r"[^A-Z0-9 &]", " ", m)
     m = re.sub(r"\s+", " ", m).strip()
     return m[:200] or (merchant or "").upper()[:200]

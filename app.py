@@ -579,6 +579,15 @@ def import_statement():
     return jsonify({"success": True, "imported": imported, "skipped": skipped, "ignored": ignored})
 
 
-if __name__ == "__main__":
+def _startup() -> None:
     init_db()
+    with SessionLocal() as session:
+        added = categorize.seed_default_rules(session)
+        if added:
+            session.commit()
+            logger.info("Seeded %s default merchant rules", added)
+
+
+if __name__ == "__main__":
+    _startup()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
