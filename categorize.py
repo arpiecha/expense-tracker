@@ -135,6 +135,9 @@ STATEMENT_CATEGORIES = {
     "car rental": "Travel",
     "professional services": "Construction / Business",
     "home improvement": "Construction / Business",
+    "fee/interest charge": "Bills & Utilities",
+    "health care": "Other",
+    "healthcare": "Other",
 }
 
 

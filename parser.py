@@ -116,6 +116,17 @@ def _amount(raw: str) -> float:
 # A statement line for a payment to the card. The alert emails say "we received
 # your payment"; a statement just says AUTOPAY or PYMT, so it needs its own list
 # or the month goes negative by the size of the payment.
+# Words a payment-to-the-card line is made of. Strip them all and a real
+# payment has nothing left — "ONLINE PAYMENT THANK YOU" becomes empty, while
+# "COMED PAYMENT" still says COMED and is therefore a refund from ComEd, not a
+# payment to Capital One.
+PAYMENT_WORDS = re.compile(
+    r"\b(auto\s*pay(ment)?|pymt|pymts|pmt|payment|payments|thank\s*you|thanks|"
+    r"online|mobile|web|electronic|e-?pay|epay|direct\s*debit|received|posted|"
+    r"to|your|the|a|of|card|credit|acct|account)\b",
+    re.IGNORECASE,
+)
+
 CARD_PAYMENT_PATTERNS = [
     r"\bautopay\b",
     r"\bpymt\b",
@@ -129,9 +140,22 @@ CARD_PAYMENT_PATTERNS = [
 
 
 def looks_like_card_payment(description: str) -> bool:
-    """Is this statement line a payment to the card rather than spending?"""
-    text = (description or "").lower()
-    return any(re.search(p, text) for p in CARD_PAYMENT_PATTERNS)
+    """Is this statement line a payment to the card rather than spending?
+
+    A payment to Capital One says so, or is nothing but payment words. A
+    merchant name alongside them means it is that merchant's refund.
+    """
+    text = (description or "").strip().lower()
+    if not text:
+        return False
+    if "capital one" in text or "capitalone" in text:
+        return True
+    if not any(re.search(p, text) for p in CARD_PAYMENT_PATTERNS):
+        return False
+    # Something other than payment words left over? Then it names a merchant.
+    remainder = PAYMENT_WORDS.sub(" ", text)
+    remainder = re.sub(r"[^a-z0-9]+", " ", remainder).strip()
+    return len(remainder) < 3
 
 
 # Everything below one of these is Capital One's standard footer. It mentions

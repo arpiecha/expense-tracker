@@ -114,6 +114,22 @@ for desc, want in [
 ]:
     check(f"card payment? {desc}", email_parser.looks_like_card_payment(desc), want)
 
+print("\nStatement lines from the real August-September export")
+for desc, want in [
+    ("CAPITAL ONE ONLINE PYMT", True),
+    ("CAPITAL ONE MOBILE PYMT", True),
+    ("ONLINE PAYMENT THANK YOU", True),
+    ("PAYMENT - THANK YOU", True),
+    ("AUTOPAY PYMT", True),
+    # A merchant's name next to the word payment means it is their refund.
+    ("COMED PAYMENT", False),
+    ("AMAZON MKTPLACE PMTS", False),
+    ("PEOPLES GAS PAYMENT", False),
+    ("SHELL OIL 574", False),
+    ("TST* LA LUNA", False),
+]:
+    check(f"card payment? {desc}", email_parser.looks_like_card_payment(desc), want)
+
 print("\nReal emails, pulled from the actual Gmail account")
 SAMPLES = pathlib.Path(__file__).parent / "samples"
 
