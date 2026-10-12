@@ -67,7 +67,16 @@ def static_files(filename: str):
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok"})
+    """Alive, and which build is answering.
+
+    A deploy can report success while the previous container is still taking
+    requests, so "ok" on its own does not mean the new code is live. The
+    commit does.
+    """
+    return jsonify({
+        "status": "ok",
+        "commit": (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "unknown")[:12],
+    })
 
 
 @app.route("/auth-check")
