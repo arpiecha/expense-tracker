@@ -134,6 +134,14 @@ for a, b, want in [
 ]:
     check(f"same merchant? {a} / {b}", same(a, b), want)
 
+print("\nInterest the card charges is its own category, not a bill")
+cz = __import__("categorize")
+check("statement category maps there", cz.from_statement_category("Fee/Interest Charge"),
+      "Interest Charges")
+check("the rule covers the real descriptor",
+      cz.normalise("INTEREST CHARGE:PURCHASES").startswith("INTEREST CHARGE "), True)
+check("it is a real category", "Interest Charges" in cz.CATEGORIES, True)
+
 print("\nAn unknown wording is handed to Claude, not guessed at")
 r = parse("Account notice", "Something happened with your card today, see the app for details.")
 check("no transactional words at all -> ignored", r.status, "ignored")

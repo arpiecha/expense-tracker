@@ -23,6 +23,7 @@ CATEGORIES = [
     "Subscriptions",
     "Rent",
     "Bills & Utilities",
+    "Interest Charges",
     "Entertainment",
     "Travel",
     "Construction / Business",
@@ -35,7 +36,9 @@ FALLBACK = "Other"
 # Merchants whose category is not a judgement call. Seeded once on startup and
 # never overwritten afterwards, so changing one on the dashboard still sticks.
 # Peoples Gas and ComEd are the heating and the electric — housing, not fuel,
-# which is what "Gas" means everywhere else in this app.
+# which is what "Gas" means everywhere else in this app. Interest is what the
+# card charges for carrying a balance; it is not a bill and it is not
+# something anyone bought, so it stands on its own.
 DEFAULT_RULES = {
     "APF GOLDBERG & PERL": "Rent",
     "GOLDBERG & PERL": "Rent",
@@ -44,6 +47,9 @@ DEFAULT_RULES = {
     "PEOPLES ENERGY": "Rent",
     "COMED": "Rent",
     "EXELON": "Rent",
+    # Covers INTEREST CHARGE:PURCHASES, :CASH ADVANCES and the rest, because a
+    # rule also matches a longer descriptor that starts with it.
+    "INTEREST CHARGE": "Interest Charges",
 }
 
 
@@ -162,7 +168,7 @@ STATEMENT_CATEGORIES = {
     "car rental": "Travel",
     "professional services": "Construction / Business",
     "home improvement": "Construction / Business",
-    "fee/interest charge": "Bills & Utilities",
+    "fee/interest charge": "Interest Charges",
     "health care": "Other",
     "healthcare": "Other",
 }
@@ -180,7 +186,9 @@ CLAUDE_SYSTEM = (
     "Construction / Business is for lumber yards, hardware stores, tool rental, "
     "trade suppliers and anything else that reads as job-site spending rather "
     "than household shopping. Transfers is for money moved between accounts, "
-    "Venmo, Zelle and cash advances. Use Other only when nothing else fits."
+    "Venmo, Zelle and cash advances. Interest Charges is for interest and fees "
+    "the card itself charges, not for anything bought. Use Other only when "
+    "nothing else fits."
 )
 
 
