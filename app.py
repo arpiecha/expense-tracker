@@ -8,6 +8,7 @@ import csv
 import io
 import logging
 import os
+import re
 import uuid
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -130,7 +131,6 @@ def ingest():
             # carries the transaction date and the email the posted date, so
             # they can be days apart — match on merchant and amount, close by.
             txn = result.txn
-            key_merchant = categorize.normalise(txn["merchant"])
             near = session.scalars(
                 select(Transaction).where(
                     Transaction.amount == txn["amount"],
@@ -139,7 +139,7 @@ def ingest():
                 )
             ).all()
             twin = next(
-                (t for t in near if categorize.normalise(t.merchant) == key_merchant), None
+                (t for t in near if categorize.same_merchant(t.merchant, txn["merchant"])), None
             )
             if twin is not None:
                 _log(session, gmail_id, subject, "ignored",
@@ -527,27 +527,35 @@ def import_statement():
             # The key doubles as the dedupe: the same date, merchant and amount
             # in the same position is the same transaction. A genuine second
             # identical charge in one day keeps its own slot through the count.
-            base = f"stmt:{when.isoformat()}:{merchant.upper()[:60]}:{amount:.2f}"
+            # Spacing is not part of the identity — Capital One exported the
+            # same nine Uber trips as "UBER *TRIP" one week and
+            # "UBER   *TRIP" the next, which duplicated every one of them.
+            tidy = re.sub(r"\s+", " ", merchant).strip().upper()[:60]
+            base = f"stmt:{when.isoformat()}:{tidy}:{amount:.2f}"
             seen[base] = seen.get(base, 0) + 1
             key = f"{base}:{seen[base]}"
+            # Rows imported before the key ignored spacing still carry the old
+            # form, so a re-import has to recognise that too.
+            legacy = f"stmt:{when.isoformat()}:{merchant.upper()[:60]}:{amount:.2f}:{seen[base]}"
 
-            if session.scalar(select(Transaction).where(Transaction.gmail_id == key)):
+            if session.scalar(
+                select(Transaction).where(Transaction.gmail_id.in_((key, legacy)))
+            ):
                 skipped += 1
                 continue
-            # An emailed alert for the same purchase may already be logged.
-            # The email quotes the posted date and the statement the
+            # An emailed alert, or a row typed in by hand, may already have this
+            # purchase. The email quotes the posted date and the statement the
             # transaction date, so they can be days apart — match on the
             # merchant and the amount within a few days either way.
             twins = session.scalars(
                 select(Transaction).where(
                     Transaction.amount == amount,
-                    Transaction.source == "email",
+                    Transaction.source.in_(("email", "manual")),
                     Transaction.date >= when - timedelta(days=4),
                     Transaction.date <= when + timedelta(days=4),
                 )
             ).all()
-            key_merchant = categorize.normalise(merchant)
-            if any(categorize.normalise(t.merchant) == key_merchant for t in twins):
+            if any(categorize.same_merchant(t.merchant, merchant) for t in twins):
                 skipped += 1
                 continue
 

@@ -15,6 +15,33 @@ from datetime import date, datetime
 
 logger = logging.getLogger(__name__)
 
+# An account can have more than one card. Capital One writes "charged to your
+# account" for the account holder and "charged to <name>'s account" for an
+# authorised user, and only the first is this person's spending.
+OTHER_CARDHOLDER_RE = re.compile(
+    r"charged to\s+(?!your\b)([A-Z][\w'-]{1,30})(?:'s|\u2019s)?\s+account", re.IGNORECASE
+)
+
+# ...unless the name is the account holder's own. If Capital One ever writes
+# the name instead of "your", ignoring it would silently drop real spending,
+# which is a worse failure than logging one extra card.
+SELF_NAMES = {
+    n.strip().lower()
+    for n in os.environ.get("CARDHOLDER_NAMES", "aege").split(",")
+    if n.strip()
+}
+
+
+def other_cardholder(text: str) -> str | None:
+    """The authorised user this charge belongs to, if it is not ours."""
+    for match in OTHER_CARDHOLDER_RE.finditer(text or ""):
+        # The possessive is part of the wording, not part of the name.
+        name = re.sub(r"['’]s$", "", match.group(1)).strip()
+        if name and name.lower() not in SELF_NAMES:
+            return name
+    return None
+
+
 # Subjects and bodies that are about the account rather than a purchase. If one
 # of these matches we stop — no regex, no Claude, no transaction.
 IGNORE_PATTERNS = [
@@ -27,6 +54,8 @@ IGNORE_PATTERNS = [
     (r"your payment of \$[\d,]+", "payment to the card"),
     (r"here are the details of your payment", "payment to the card"),
     (r"charged twice", "duplicate-charge notice"),
+    (r"payment (has been |was )?returned", "returned payment"),
+    (r"returned\s+(online\s+)?ach", "returned payment"),
     (r"your statement is ready", "statement"),
     (r"statement is available", "statement"),
     (r"minimum payment", "payment reminder"),
@@ -127,6 +156,15 @@ PAYMENT_WORDS = re.compile(
     re.IGNORECASE,
 )
 
+# A returned or reversed payment is a debit on the statement, but it only
+# undoes a payment - it is not a purchase, and counting it would add the whole
+# payment to the month's spending.
+PAYMENT_REVERSAL = re.compile(
+    r"\b(returned|reversal|reversed|nsf|declined)\b.*\b(ach|payment|payme|pymt|pmt)\b"
+    r"|\b(ach|payment|payme|pymt|pmt)\b.*\b(returned|reversal|reversed|nsf)\b",
+    re.IGNORECASE,
+)
+
 CARD_PAYMENT_PATTERNS = [
     r"\bautopay\b",
     r"\bpymt\b",
@@ -148,6 +186,8 @@ def looks_like_card_payment(description: str) -> bool:
     text = (description or "").strip().lower()
     if not text:
         return False
+    if PAYMENT_REVERSAL.search(text):
+        return True
     if "capital one" in text or "capitalone" in text:
         return True
     if not any(re.search(p, text) for p in CARD_PAYMENT_PATTERNS):
@@ -197,6 +237,11 @@ def parse_email(subject: str, body: str, received: date, use_claude: bool = True
     reason = ignored_reason(subject, body)
     if reason:
         return ParseResult("ignored", reason)
+
+    # Someone else's card on the same account.
+    other = other_cardholder(f"{subject}\n{meaningful_part(body)}")
+    if other:
+        return ParseResult("ignored", f"{other}'s card, not yours")
 
     text = f"{subject}\n{meaningful_part(body)}"
     card = RE_CARD.search(text)

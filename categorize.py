@@ -79,6 +79,33 @@ def normalise(merchant: str) -> str:
     return m[:200] or (merchant or "").upper()[:200]
 
 
+def _dedupe_key(merchant: str) -> str:
+    """normalise() with the spaces taken out too.
+
+    For telling whether two rows are the same purchase, spacing is noise:
+    a statement says TRADER JOE S #703 and a hand-typed row says TRADER JOES.
+    """
+    return re.sub(r"[^A-Z0-9]+", "", normalise(merchant))
+
+
+def same_merchant(a: str, b: str) -> bool:
+    """Do these two descriptors name the same merchant?
+
+    Capital One truncates descriptions, so one is often the start of the
+    other: SQ *AQUALUX AUTO SPA L is SQ *AQUALUX AUTO SPA LLC cut short, and
+    AMOCO is AMOCO#1776350GREENWOOD A. Five characters is enough to be a name
+    rather than a coincidence, and this is only ever asked about two rows that
+    already share an amount and a date.
+    """
+    ka, kb = _dedupe_key(a), _dedupe_key(b)
+    if not ka or not kb:
+        return False
+    if ka == kb:
+        return True
+    short, long = sorted((ka, kb), key=len)
+    return len(short) >= 5 and long.startswith(short)
+
+
 def rule_for(session, merchant: str) -> str | None:
     key = normalise(merchant)
     if not key:

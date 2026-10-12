@@ -87,6 +87,53 @@ for subject, body, why in [
     r = parse(subject, body)
     check(f"ignored — {why}", r.status, "ignored")
 
+print("\nAnother cardholder on the same account is not your spending")
+r = parse(
+    "A new transaction was charged to Roland's account",
+    "Hi Aege,\n\nAmazon charged your account for $309.66 on Oct. 7, 2026.\n"
+    "Venture Credit Card...5508\n",
+)
+check("Roland's card -> ignored", r.status, "ignored")
+check("reason names the cardholder", r.reason, "Roland's card, not yours")
+
+r = parse(
+    "A new transaction was charged to Aege's account",
+    "Hi Aege,\n\nSHELL OIL 574 charged your account for $48.20 on Oct. 6, 2026.\n",
+)
+check("your own name is still your spending", r.status, "transaction")
+
+r = parse(
+    "A new transaction was charged to your account",
+    "Hi Aege,\n\nSHELL OIL 574 charged your account for $48.20 on Oct. 6, 2026.\n",
+)
+check("'your account' is unaffected", r.status, "transaction")
+
+print("\nA bounced payment is not a $13,996 purchase")
+for desc in [
+    "Returned Online ACH Payme",
+    "RETURNED ONLINE ACH PAYMENT",
+    "PAYMENT REVERSAL",
+    "ACH PAYMENT RETURNED",
+]:
+    check(f"card payment? {desc}", email_parser.looks_like_card_payment(desc), True)
+r = parse("Your payment was returned", "Your payment of $13,996.22 has been returned.")
+check("returned-payment email -> ignored", r.status, "ignored")
+
+print("\nTelling two rows apart is about the name, not the spacing")
+same = __import__("categorize").same_merchant
+for a, b, want in [
+    ("TRADER JOES", "TRADER JOE S #703", True),
+    ("SQ *AQUALUX AUTO SPA L", "SQ *AQUALUX AUTO SPA LLC", True),
+    ("AMOCO", "AMOCO#1776350GREENWOOD A", True),
+    ("AUTOZONE", "AUTOZONE #4437", True),
+    ("UBER *TRIP", "UBER   *TRIP", True),
+    ("TRADER JOES", "WHOLE FOODS", False),
+    ("SHELL OIL 574", "SHELL OIL 10009015008", True),
+    ("LAKAI", "LA MICHOACANA PREMIUM", False),
+    ("DUBLINS BAR AND GRILL", "KIRKWOOD BAR + GRILL", False),
+]:
+    check(f"same merchant? {a} / {b}", same(a, b), want)
+
 print("\nAn unknown wording is handed to Claude, not guessed at")
 r = parse("Account notice", "Something happened with your card today, see the app for details.")
 check("no transactional words at all -> ignored", r.status, "ignored")
