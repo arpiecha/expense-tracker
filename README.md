@@ -59,9 +59,17 @@ already logged is skipped.
 
 To check it is working: **Executions** in the left sidebar shows every run.
 
-The script labels each thread `Expenses CapitalOne/Processed` once it has been
-sent, which is how it knows not to send it twice. Nothing is deleted, and if
-the app cannot be reached the thread is left alone and retried on the next run.
+The script remembers the ID of every message it has sent, which is how it
+knows not to send one twice. Nothing is deleted and nothing is labelled, and a
+message the app could not be handed is tried again on the next run.
+
+It is deliberately per-message rather than per-thread. Capital One gives every
+purchase alert the same subject, so Gmail files them all in one conversation —
+one October thread held 21 of them. An earlier version marked the whole thread
+as done after the first alert and silently skipped the other twenty.
+
+If you ever want it to go back over the last fortnight from scratch, run
+**forgetWhatWasSent** once. The app ignores anything it already has.
 
 ## What counts as a purchase
 
