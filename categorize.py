@@ -109,7 +109,42 @@ def same_merchant(a: str, b: str) -> bool:
     if ka == kb:
         return True
     short, long = sorted((ka, kb), key=len)
-    return len(short) >= 5 and long.startswith(short)
+    if len(short) >= 5 and long.startswith(short):
+        return True
+
+    # An alert names the merchant plainly and the statement names it the way
+    # the card network does, with the payment processor stuck on the front:
+    # "LE PETIT MARCEL" against "TST* LE PETIT MARCEL". One name sitting
+    # inside the other is the same place.
+    ta, tb = set(normalise(a).split()), set(normalise(b).split())
+    if not ta or not tb:
+        return False
+    if ta <= tb or tb <= ta:
+        return True
+
+    # Sometimes the brand leads and the processor's word trails instead:
+    # "Uber Technologies" against "UBER *TRIP". A shared leading word carries
+    # that, but only a real one — "THE Burwood Tap" and "THE Carlyle Club"
+    # share nothing that matters.
+    fa, fb = normalise(a).split()[0], normalise(b).split()[0]
+    return fa == fb and len(fa) >= 4
+
+
+# How much larger a posted amount may be than the alert and still be the same
+# purchase. Capital One says so itself: "You'll receive this notification for
+# both purchases and pending authorizations." A restaurant authorises the bill
+# and posts it later with the tip on top, so the alert for Dublins says $135.55
+# and the statement says $155.55.
+TIP_HEADROOM = 1.4
+
+
+def posted_covers_alert(alert: float, posted: float) -> bool:
+    """Could this posted amount be that alert, once a tip went on?"""
+    if round(alert, 2) == round(posted, 2):
+        return True
+    if alert <= 0 or posted <= 0:          # refunds post for what they are
+        return False
+    return alert < posted <= alert * TIP_HEADROOM
 
 
 def rule_for(session, merchant: str) -> str | None:

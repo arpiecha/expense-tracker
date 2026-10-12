@@ -134,6 +134,60 @@ for a, b, want in [
 ]:
     check(f"same merchant? {a} / {b}", same(a, b), want)
 
+print("\nThe card number says whose spending it is")
+r = parse("A new transaction was charged to Roland's account",
+          "As requested, we're notifying you that on Oct. 9, 2026, at AMOCO, a pending\n"
+          "authorization in the amount of $95.62 was placed on Roland's Venture X Card.\n"
+          "About Roland's Venture X Card ending in 6644\n")
+check("another card -> ignored", r.status, "ignored")
+r = parse("A new transaction was charged to your account",
+          "SHELL OIL 574 charged your account for $48.20 on Oct. 6, 2026.\n"
+          "Venture Credit Card...5508\n")
+check("our card -> logged", r.status, "transaction")
+r = parse("A new transaction was charged to your account",
+          "SHELL OIL 574 charged your account for $48.20 on Oct. 6, 2026.\n")
+check("no card named -> still logged", r.status, "transaction")
+
+print("\nAn alert and its posted statement line are the same purchase")
+cz = __import__("categorize")
+# Every one of these is a real pair from the October catch-up.
+for alert, posted, want in [
+    ("AVLI TAVERNA - LINCO", "TST* AVLI TAVERNA - LINCO", True),
+    ("LE PETIT MARCEL", "TST* LE PETIT MARCEL", True),
+    ("PURE GREEN LINCOLN", "SQ *PURE GREEN LINCOLN AV", True),
+    ("Uber Technologies", "UBER *TRIP", True),
+    ("THE BURWOOD TAP", "THE BURWOOD TAP.", True),
+    ("DUBLINS BAR AND GRILL", "DUBLINS BAR AND GRILL", True),
+    ("GLF*CLOCKTOWER", "GLF*CLOCKTOWER", True),
+    ("Amazon", "AMAZON MKTPL*5E6EC3TF1", True),
+    ("7-Eleven", "7-ELEVEN 24606", True),
+    ("KINCADE'S", "TST* KINCADE'S", True),
+    # Two different places that happen to start the same way.
+    ("THE BURWOOD TAP", "TST* THE CARLYLE CLUB", False),
+    ("DUBLINS BAR AND GRILL", "KIRKWOOD BAR + GRILL", False),
+    ("LAKAI", "LA MICHOACANA PREMIUM", False),
+    ("TST* LA LUNA", "TST*KING OF CUPS", False),
+    ("BELMONT HARBOR GAS DOCK", "BURNHAM HARBOR BOAT LAUN", False),
+]:
+    check(f"same merchant? {alert} / {posted}", cz.same_merchant(alert, posted), want)
+
+print("\nA tip goes on after the alert, so the posted amount may be higher")
+for alert, posted, want in [
+    (135.55, 155.55, True),      # Dublins
+    (7.56, 10.56, True),
+    (8.00, 10.00, True),
+    (113.03, 143.03, True),      # Le Petit Marcel
+    (26.20, 31.20, True),        # Clocktower
+    (21.00, 28.00, True),        # Burwood
+    (17.37, 17.37, True),        # Pure Green, no tip
+    (34.16, 28.65, False),       # a second 7-Eleven visit, not the first one
+    (10.00, 100.00, False),      # nowhere near
+    (-30.92, -30.92, True),      # a refund posts for what it is
+    (-30.92, -40.00, False),
+]:
+    check(f"posted {posted} covers alert {alert}?",
+          cz.posted_covers_alert(alert, posted), want)
+
 print("\nInterest the card charges is its own category, not a bill")
 cz = __import__("categorize")
 check("statement category maps there", cz.from_statement_category("Fee/Interest Charge"),

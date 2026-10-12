@@ -32,6 +32,12 @@ SELF_NAMES = {
 }
 
 
+# The card this tracker is for. An alert names the card it is about — "Venture
+# Credit Card...5508" for this one, "Venture X Card ending in 6644" for the
+# other cardholder — and the number is exact where a name is a guess.
+OUR_CARD = (os.environ.get("CARD_LAST4") or "5508").strip()
+
+
 def other_cardholder(text: str) -> str | None:
     """The authorised user this charge belongs to, if it is not ours."""
     for match in OTHER_CARDHOLDER_RE.finditer(text or ""):
@@ -246,6 +252,12 @@ def parse_email(subject: str, body: str, received: date, use_claude: bool = True
     text = f"{subject}\n{meaningful_part(body)}"
     card = RE_CARD.search(text)
     card_last4 = card.group(1) if card else None
+
+    # An alert that names a different card is a different card's spending. A
+    # card number is exact, where a cardholder's name has to be guessed at; an
+    # alert that names no card at all is still read, the way it always was.
+    if OUR_CARD and card_last4 and card_last4 != OUR_CARD:
+        return ParseResult("ignored", f"card ...{card_last4}, not yours")
 
     for regex, is_credit in ((RE_CHARGED, False), (RE_CREDITED, True), (RE_PURCHASE_OF, False)):
         m = regex.search(text)

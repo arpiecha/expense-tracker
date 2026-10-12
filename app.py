@@ -139,16 +139,22 @@ def ingest():
             # The statement import may already have this purchase. The statement
             # carries the transaction date and the email the posted date, so
             # they can be days apart — match on merchant and amount, close by.
+            # An alert is an authorisation: the merchant has asked for the
+            # money, not necessarily for the final amount. So an alert matches
+            # anything already logged for the same merchant a few days either
+            # side at the same amount or a little more.
             txn = result.txn
             near = session.scalars(
                 select(Transaction).where(
-                    Transaction.amount == txn["amount"],
                     Transaction.date >= txn["date"] - timedelta(days=4),
                     Transaction.date <= txn["date"] + timedelta(days=4),
                 )
             ).all()
             twin = next(
-                (t for t in near if categorize.same_merchant(t.merchant, txn["merchant"])), None
+                (t for t in near
+                 if categorize.same_merchant(t.merchant, txn["merchant"])
+                 and categorize.posted_covers_alert(txn["amount"], float(t.amount))),
+                None,
             )
             if twin is not None:
                 _log(session, gmail_id, subject, "ignored",
@@ -428,6 +434,59 @@ def recategorize():
     return jsonify({"success": True, "looked_at": len(rows), "changed": changed})
 
 
+@app.route("/dedupe", methods=["POST"])
+def dedupe():
+    """Remove alerts whose purchase the statement already carries.
+
+    An alert is an authorisation, so when a statement line for the same
+    merchant turns up a few days either side at the same amount or a little
+    more, the alert is the same purchase at the pre-tip price. The statement
+    is the final word and the alert is the one that goes.
+
+    This only matters when the alert arrived *after* the statement was
+    imported — the import handles it the other way round itself. Says what it
+    would remove and changes nothing unless asked with apply=1.
+    """
+    if (err := require_auth()):
+        return err
+    apply = request.args.get("apply") in ("1", "true", "yes")
+
+    removed = []
+    with SessionLocal() as session:
+        statement_rows = session.scalars(
+            select(Transaction).where(Transaction.source == "statement")
+        ).all()
+        provisional = session.scalars(
+            select(Transaction).where(Transaction.source.in_(("email", "manual")))
+        ).all()
+
+        # One statement line can only account for one alert, or three nights at
+        # the same bar would collapse into one.
+        claimed: set[int] = set()
+        for row in sorted(provisional, key=lambda r: r.id):
+            match = next(
+                (s for s in statement_rows
+                 if s.id not in claimed
+                 and abs((s.date - row.date).days) <= 4
+                 and categorize.same_merchant(s.merchant, row.merchant)
+                 and categorize.posted_covers_alert(float(row.amount), float(s.amount))),
+                None,
+            )
+            if match is None:
+                continue
+            claimed.add(match.id)
+            removed.append({
+                "removed": row.to_dict(),
+                "because_of": match.to_dict(),
+            })
+            if apply:
+                session.delete(row)
+        if apply:
+            session.commit()
+
+    return jsonify({"applied": apply, "count": len(removed), "removed": removed})
+
+
 # --- statement import ---------------------------------------------------
 
 def _read_rows(filename: str, raw: bytes) -> list[dict]:
@@ -503,7 +562,7 @@ def import_statement():
         logger.exception("Could not read the statement")
         return jsonify({"error": f"Could not read that file: {exc}"}), 400
 
-    imported = skipped = ignored = 0
+    imported = skipped = ignored = replaced = 0
     seen: dict[str, int] = {}
 
     with SessionLocal() as session:
@@ -553,20 +612,27 @@ def import_statement():
                 skipped += 1
                 continue
             # An emailed alert, or a row typed in by hand, may already have this
-            # purchase. The email quotes the posted date and the statement the
-            # transaction date, so they can be days apart — match on the
-            # merchant and the amount within a few days either way.
+            # purchase — at the authorised amount rather than the posted one.
+            # The statement is the final word, so it replaces that row instead
+            # of standing down to it, and the month stops carrying a purchase
+            # at the pre-tip price.
             twins = session.scalars(
                 select(Transaction).where(
-                    Transaction.amount == amount,
                     Transaction.source.in_(("email", "manual")),
                     Transaction.date >= when - timedelta(days=4),
                     Transaction.date <= when + timedelta(days=4),
                 )
             ).all()
-            if any(categorize.same_merchant(t.merchant, merchant) for t in twins):
-                skipped += 1
-                continue
+            provisional = next(
+                (t for t in twins
+                 if categorize.same_merchant(t.merchant, merchant)
+                 and categorize.posted_covers_alert(float(t.amount), amount)),
+                None,
+            )
+            if provisional is not None:
+                session.delete(provisional)
+                session.flush()
+                replaced += 1
 
             statement_category = _pick(row, "Category")
             category = categorize.rule_for(session, merchant)
@@ -592,8 +658,10 @@ def import_statement():
 
         session.commit()
 
-    logger.info("Statement: imported %s, skipped %s, ignored %s", imported, skipped, ignored)
-    return jsonify({"success": True, "imported": imported, "skipped": skipped, "ignored": ignored})
+    logger.info("Statement: imported %s, skipped %s, ignored %s, replaced %s",
+                imported, skipped, ignored, replaced)
+    return jsonify({"success": True, "imported": imported, "skipped": skipped,
+                    "ignored": ignored, "replaced": replaced})
 
 
 def _startup() -> None:
