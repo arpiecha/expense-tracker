@@ -28,10 +28,16 @@ CATEGORIES = [
     "Travel",
     "Construction / Business",
     "Transfers",
+    "Returns / Sales",
     "Other",
 ]
 
 FALLBACK = "Other"
+
+# Money coming back rather than going out: refunds, returns, dispute credits,
+# and things sold. It is its own section whatever the merchant is — a refund
+# from AutoZone is not a Gas expense with a minus sign in front of it.
+RETURNS = "Returns / Sales"
 
 # Merchants whose category is not a judgement call. Seeded once on startup and
 # never overwritten afterwards, so changing one on the dashboard still sticks.
@@ -169,6 +175,10 @@ def remember(session, merchant: str, category: str) -> None:
     key = normalise(merchant)
     if not key or category not in CATEGORIES:
         return
+    # Never learned from: one refund from a shop would otherwise file
+    # everything ever bought there as a return.
+    if category == RETURNS:
+        return
     rule = session.scalar(select(MerchantRule).where(MerchantRule.pattern == key))
     if rule:
         rule.category = category
@@ -279,3 +289,14 @@ def categorize(session, merchant: str) -> str:
         return FALLBACK
     remember(session, merchant, category)
     return category
+
+
+def category_for(session, merchant: str, amount: float) -> str:
+    """The category for one transaction, deciding on the amount as well.
+
+    Anything negative is money coming back, and that is a section of its own
+    no matter which merchant it came from.
+    """
+    if amount < 0:
+        return RETURNS
+    return categorize(session, merchant)

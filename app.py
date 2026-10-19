@@ -168,7 +168,7 @@ def ingest():
             return jsonify({"status": result.status, "reason": result.reason})
 
         txn = result.txn
-        category = categorize.categorize(session, txn["merchant"])
+        category = categorize.category_for(session, txn["merchant"], txn["amount"])
         row = Transaction(
             gmail_id=gmail_id,
             date=txn["date"],
@@ -322,7 +322,7 @@ def add_transaction():
     with SessionLocal() as session:
         category = (data.get("category") or "").strip()
         if category not in categorize.CATEGORIES:
-            category = categorize.categorize(session, merchant)
+            category = categorize.category_for(session, merchant, amount)
         row = Transaction(
             gmail_id=f"manual:{uuid.uuid4()}",
             date=when,
@@ -635,7 +635,8 @@ def import_statement():
                 replaced += 1
 
             statement_category = _pick(row, "Category")
-            category = categorize.rule_for(session, merchant)
+            # A credit is a return whatever Capital One filed it under.
+            category = categorize.RETURNS if amount < 0 else categorize.rule_for(session, merchant)
             if not category:
                 category = (statement_category if statement_category in categorize.CATEGORIES
                             else categorize.from_statement_category(statement_category))

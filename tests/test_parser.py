@@ -188,6 +188,25 @@ for alert, posted, want in [
     check(f"posted {posted} covers alert {alert}?",
           cz.posted_covers_alert(alert, posted), want)
 
+print("\nMoney coming back is its own section")
+import db as _db                                                  # noqa: E402
+cz = __import__("categorize")
+_db.init_db()
+with _db.SessionLocal() as _s:
+    cz.remember(_s, "AUTOZONE #4437", "Gas")
+    _s.flush()
+    check("a refund is a return, not negative Gas",
+          cz.category_for(_s, "AUTOZONE #4437", -30.92), "Returns / Sales")
+    check("a purchase there is still Gas",
+          cz.category_for(_s, "AUTOZONE #4437", 11.47), "Gas")
+    check("something sold for cash is a return too",
+          cz.category_for(_s, "DJ board (sold)", -300.00), "Returns / Sales")
+    # One refund must not re-file everything ever bought from that shop.
+    cz.remember(_s, "AUTOZONE #4437", "Returns / Sales")
+    _s.flush()
+    check("a return is never learned as a rule",
+          cz.rule_for(_s, "AUTOZONE #4437"), "Gas")
+
 print("\nInterest the card charges is its own category, not a bill")
 cz = __import__("categorize")
 check("statement category maps there", cz.from_statement_category("Fee/Interest Charge"),

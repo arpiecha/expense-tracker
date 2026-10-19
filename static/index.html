@@ -68,6 +68,7 @@
   .lg .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .lg .pc { color:var(--muted); font-size:12px; flex-shrink:0; }
   .lg .amt { font-weight:500; flex-shrink:0; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .lg .amt.credit { color:var(--green); }
 
   /* Tapping a category opens its purchases right underneath it. */
   .lg .chev { color:var(--muted); font-size:9px; width:8px; flex-shrink:0;
@@ -419,21 +420,31 @@ function renderChart() {
     });
   }
 
-  $('legend').innerHTML = cats.map((c, i) => {
-    const pct = total ? Math.round(c.total / total * 100) : 0;
+  // Money coming back has no share of what was spent and no slice of the
+  // doughnut, so it is listed underneath the spending rather than among it.
+  const credits = summary.by_category.filter(c => c.total < 0);
+
+  const legendRow = (c, colour, note) => {
     const open = openCats.has(c.category);
     return '<div class="lgwrap">' +
       '<div class="lg' + (open ? ' on' : '') + '" data-cat="' + esc(c.category) + '">' +
         '<span class="chev">▶</span>' +
-        '<span class="dot" style="background:' + PALETTE[i % PALETTE.length] + '"></span>' +
+        '<span class="dot" style="background:' + colour + '"></span>' +
         '<span class="nm">' + esc(c.category) + '</span>' +
-        '<span class="pc">' + pct + '%</span>' +
-        '<span class="amt">' + money(c.total) + '</span>' +
+        '<span class="pc">' + note + '</span>' +
+        '<span class="amt' + (c.total < 0 ? ' credit' : '') + '">' + money(c.total) + '</span>' +
       '</div>' +
       '<div class="catbody' + (open ? ' open' : '') + '" id="cat-' +
         c.category.replace(/[^A-Za-z]/g, '') + '"></div>' +
     '</div>';
-  }).join('') || '<div class="empty">Nothing yet this month</div>';
+  };
+
+  $('legend').innerHTML =
+    (cats.map((c, i) => legendRow(
+       c, PALETTE[i % PALETTE.length],
+       (total ? Math.round(c.total / total * 100) : 0) + '%')).join('') +
+     credits.map(c => legendRow(c, 'var(--green)', 'back')).join(''))
+    || '<div class="empty">Nothing yet this month</div>';
 
   $('legend').querySelectorAll('.lg').forEach(el => {
     el.onclick = () => toggleCategory(el.dataset.cat);
