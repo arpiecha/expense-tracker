@@ -88,6 +88,18 @@ RE_PURCHASE_OF = re.compile(
     re.IGNORECASE,
 )
 
+# The wording this account actually gets, on nearly every alert:
+# "...on Nov. 3, 2026, at 7-Eleven, a pending authorization or purchase in the
+#  amount of $12.99 was placed or charged on your Venture Credit Card."
+# Without this the regexes all miss and every single alert costs a call to
+# Claude to read something entirely formulaic.
+RE_PENDING_AUTH = re.compile(
+    r"on\s+(?P<date>[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}),?\s+at\s+(?P<merchant>[^\n]{2,120}?),\s+"
+    r"an?\s+pending authorization or purchase in the amount of\s+"
+    r"\$(?P<amount>[\d,]+\.?\d{0,2})",
+    re.IGNORECASE,
+)
+
 # "MERCHANT recently credited your account for $38.85 on Oct. 1, 2026."
 RE_CREDITED = re.compile(
     r"(?:^|\n)[ \t]*(?P<merchant>[^\n]{2,120}?)\s+(?:recently\s+)?credited your account for\s+"
@@ -259,7 +271,8 @@ def parse_email(subject: str, body: str, received: date, use_claude: bool = True
     if OUR_CARD and card_last4 and card_last4 != OUR_CARD:
         return ParseResult("ignored", f"card ...{card_last4}, not yours")
 
-    for regex, is_credit in ((RE_CHARGED, False), (RE_CREDITED, True), (RE_PURCHASE_OF, False)):
+    for regex, is_credit in ((RE_CHARGED, False), (RE_CREDITED, True),
+                             (RE_PENDING_AUTH, False), (RE_PURCHASE_OF, False)):
         m = regex.search(text)
         if not m:
             continue

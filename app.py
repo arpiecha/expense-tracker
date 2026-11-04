@@ -136,13 +136,6 @@ def ingest():
         result = email_parser.parse_email(subject, body, received)
 
         if result.status == "transaction":
-            # The statement import may already have this purchase. The statement
-            # carries the transaction date and the email the posted date, so
-            # they can be days apart — match on merchant and amount, close by.
-            # An alert is an authorisation: the merchant has asked for the
-            # money, not necessarily for the final amount. So an alert matches
-            # anything already logged for the same merchant a few days either
-            # side at the same amount or a little more.
             txn = result.txn
             near = session.scalars(
                 select(Transaction).where(
@@ -150,12 +143,26 @@ def ingest():
                     Transaction.date <= txn["date"] + timedelta(days=4),
                 )
             ).all()
-            twin = next(
-                (t for t in near
-                 if categorize.same_merchant(t.merchant, txn["merchant"])
-                 and categorize.posted_covers_alert(txn["amount"], float(t.amount))),
-                None,
-            )
+
+            def already_have(t) -> bool:
+                """Is this alert a purchase we have already got?"""
+                if not categorize.same_merchant(t.merchant, txn["merchant"]):
+                    return False
+                if t.source == "email":
+                    # Two alerts for one purchase: Capital One sends one when
+                    # the card is authorised and another when it posts, for the
+                    # same amount on the same day. A different day or a
+                    # different amount is a different purchase — two runs to
+                    # the same shop, not one counted twice. The tip allowance
+                    # below must not reach between two alerts, or a $12.99
+                    # 7-Eleven run vanishes into yesterday's $16.53 one.
+                    return (t.date == txn["date"]
+                            and round(float(t.amount), 2) == round(txn["amount"], 2))
+                # A statement or hand-typed row is the posted version of the
+                # purchase, tip and all, and the dates can be days apart.
+                return categorize.posted_covers_alert(txn["amount"], float(t.amount))
+
+            twin = next((t for t in near if already_have(t)), None)
             if twin is not None:
                 _log(session, gmail_id, subject, "ignored",
                      f"already logged from the {twin.source} on {twin.date.isoformat()}")
