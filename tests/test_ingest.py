@@ -76,6 +76,31 @@ print("\nStill only this card")
 check("another card -> ignored", alert("WHOLE FOODS", 20.00, "Nov. 3, 2026", card="4846")["status"],
       "ignored")
 
+print("\nRent covering two people is stored as one share")
+check("the double charge is halved",
+      flask_app.split_if_shared("APF*Goldberg & Perl, Inc", 3398.67)[0], 1699.34)
+check("and says so in the note",
+      "full charge was $3,398.67" in flask_app.split_if_shared("APF*Goldberg & Perl, Inc", 3398.67)[1],
+      True)
+check("a single share is left exactly alone",
+      flask_app.split_if_shared("APF*Goldberg & Perl, Inc.", 1699.33), (1699.33, None))
+check("so is a rent rise that is still one share",
+      flask_app.split_if_shared("APF*Goldberg & Perl, Inc.", 1850.00), (1850.00, None))
+check("a rent rise on the shared charge still halves",
+      flask_app.split_if_shared("APF*Goldberg & Perl, Inc.", 3600.00)[0], 1800.00)
+check("a refund from them is never split",
+      flask_app.split_if_shared("APF*Goldberg & Perl, Inc.", -3398.67), (-3398.67, None))
+check("nobody else is touched",
+      flask_app.split_if_shared("NOBU CHICAGO", 3398.67), (3398.67, None))
+
+# And end to end, through a real alert.
+r = alert("APF*Goldberg & Perl, Inc", 3398.67, "Dec. 9, 2026")
+check("alert for the double charge -> logged at half", r["transaction"]["amount"], 1699.34)
+check("alert for the double charge -> noted",
+      "3,398.67" in r["transaction"]["note"], True)
+r = alert("APF*Goldberg & Perl, Inc", 1699.33, "Dec. 10, 2026")
+check("alert for a single share -> logged in full", r["transaction"]["amount"], 1699.33)
+
 print("\nA refund still files itself under Returns / Sales")
 r = client.post("/ingest", json={
     "gmail_id": str(uuid.uuid4()), "subject": "You have a credit from LAKAI",

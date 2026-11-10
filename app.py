@@ -40,6 +40,37 @@ def today() -> date:
     return datetime.now(TZ).date()
 
 
+# Charges that cover more than one person. Rent is billed to this card in
+# full and split with a flatmate, so only half of it is this person's spending.
+#
+# The size is what tells the two cases apart: Goldberg bills $1,699.33 for one
+# share and $3,398.67 for two, and only the second needs halving. A threshold
+# rather than an exact figure, so a rent rise still splits correctly, set well
+# clear of a single share.
+SHARED_CHARGES = [
+    # merchant key, as normalise() writes it; shared above; split how many ways
+    ("GOLDBERG", 2500.00, 2),
+]
+
+
+def split_if_shared(merchant: str, amount: float) -> tuple[float, str | None]:
+    """This person's share of a charge, and a note saying so if it was split.
+
+    Refunds are never split: a credit against a shared charge is its own
+    arrangement, not something to guess at.
+    """
+    if amount <= 0:
+        return amount, None
+    key = categorize.normalise(merchant)
+    for pattern, threshold, ways in SHARED_CHARGES:
+        if pattern in key and amount >= threshold:
+            return round(amount / ways, 2), (
+                f"Split {ways} ways with roommate - full charge was "
+                f"${amount:,.2f}, this is my share"
+            )
+    return amount, None
+
+
 def password_ok() -> bool:
     if not ADMIN_PASSWORD:
         return True                       # nothing set: the app is open
@@ -137,6 +168,9 @@ def ingest():
 
         if result.status == "transaction":
             txn = result.txn
+            # Take this person's share before anything else looks at the
+            # amount, so the dedupe below compares like with like.
+            txn["amount"], split_note = split_if_shared(txn["merchant"], txn["amount"])
             near = session.scalars(
                 select(Transaction).where(
                     Transaction.date >= txn["date"] - timedelta(days=4),
@@ -185,6 +219,7 @@ def ingest():
             category=category,
             card_last4=txn.get("card_last4"),
             source="email",
+            note=split_note,
         )
         session.add(row)
         _log(session, gmail_id, subject, "inserted", f"{txn['merchant']} ${txn['amount']:.2f}")
@@ -618,6 +653,12 @@ def import_statement():
             ):
                 skipped += 1
                 continue
+
+            # The key above is built from the figure on the statement, so it
+            # stays the same line whatever we store. Only this person's share
+            # of a shared charge is spending, so that is what gets stored and
+            # what the matching below compares.
+            amount, split_note = split_if_shared(merchant, amount)
             # An emailed alert, or a row typed in by hand, may already have this
             # purchase — at the authorised amount rather than the posted one.
             # The statement is the final word, so it replaces that row instead
@@ -661,6 +702,7 @@ def import_statement():
                 category=category,
                 card_last4=_pick(row, "Card No.", "CardNo", "Card")[-4:] or None,
                 source="statement",
+                note=split_note,
             ))
             imported += 1
 
